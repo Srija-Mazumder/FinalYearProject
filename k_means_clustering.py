@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
@@ -6,6 +7,45 @@ from sklearn.metrics import silhouette_score
 import matplotlib.pyplot as plt
 from io import StringIO
 import os
+
+# Function to find the closest gene to each cluster center
+def find_closest_gene(center, data_points, gene_ids):
+    distances = np.linalg.norm(data_points - center, axis=1)
+    closest_index = np.argmin(distances)
+    return gene_ids.iloc[closest_index], data_points[closest_index]
+
+# Function to find the closest gene to each cluster center
+def find_closest_genes_to_centers(cluster_centers, data_points, gene_names):
+    closest_genes = []
+    for center in cluster_centers:
+        closest_gene, _ = find_closest_gene(center, data_points, gene_names)
+        closest_genes.append(closest_gene)
+    return closest_genes
+
+# Function for plotting clusters
+def plot_clusters(features_pca, labels, centers_pca, k):
+    plt.figure(figsize=(12, 8))
+    scatter = plt.scatter(features_pca[:, 0], features_pca[:, 1], c=labels, cmap='viridis', alpha=0.7)
+    plt.scatter(centers_pca[:, 0], centers_pca[:, 1], c='red', marker='x', s=200, linewidths=3, label='Cluster Centers')
+    plt.title(f'K-means Clustering Results (k={k})')
+    plt.xlabel('First Principal Component')
+    plt.ylabel('Second Principal Component')
+    plt.legend()
+    plt.colorbar(scatter, label='Cluster Label')
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Add annotations for cluster centers
+    for i, (x, y) in enumerate(centers_pca):
+        plt.annotate(f'Center {i + 1}', (x, y), xytext=(5, 5), textcoords='offset points')
+
+    plt.tight_layout()
+
+    # Save the plot
+    file_path = os.path.join(folder_path, f'cluster_plot_k{k}.png')
+    plt.savefig(file_path, dpi=300, bbox_inches='tight')
+    print(f"Cluster plot for k={k} saved to '{file_path}'.")
+
+    plt.show()
 
 # Initialize lists to store metadata and data
 metadata = []
@@ -17,52 +57,48 @@ with open(r'C:\Users\hp\OneDrive\Desktop\ARM SIR ML\GSE48350_series_matrix.txt',
 
     for line in file:
         if line.startswith("!series_matrix_table_begin"):
-            # Change the flag when we detect the table begins
             is_table = True
             continue
         elif line.startswith("!series_matrix_table_end"):
-            # End flag for the table (if it exists), useful for extra safety
             is_table = False
             break
 
         if is_table:
-            # Append lines to data if inside the table
             data_lines.append(line)
         else:
-            # Append lines to metadata if before the table starts
             metadata.append(line)
 
-# Print or store metadata for later use
 print("Metadata:\n", metadata[:10])  # Printing the first few lines of metadata
 
-# Now, handle the data part
 # Convert data into a pandas dataframe
 if data_lines:
-    # Convert the list of lines into a DataFrame
     data = pd.read_csv(StringIO(''.join(data_lines)), delimiter='\t')
     print("Data Preview:\n", data.head())  # Check the first few rows
 else:
     print("No data found after '!series_matrix_table_begin'.")
+    exit()
 
-# Check if data is normalized (assuming `data` is your DataFrame)
-# Select only numerical columns to test normalization
+# Extract the gene names (ID_REF column) before performing any operations
+gene_names = data['ID_REF']
+
+# Store the original data before normalization
+original_data = data.copy()
+
+# Check if data is normalized
 numerical_data = data.select_dtypes(include=['float64', 'int64'])
 
 # Get the minimum and maximum for each column
 min_values = numerical_data.min()
 max_values = numerical_data.max()
 
-# Display the min and max values for each column
 print("Min values:\n", min_values)
 print("\nMax values:\n", max_values)
 
-# Identify columns that are not normalized (i.e., those with min != 0 or max != 1)
+# Identify columns that are not normalized
 non_normalized_cols = [col for col in numerical_data.columns if min_values[col] != 0 or max_values[col] != 1]
 
 # Create a copy of the data to avoid modifying the original dataframe
 data_normalized = data.copy()
-
-# Apply Min-Max scaling to the non-normalized columns
 scaler = MinMaxScaler()
 data_normalized[non_normalized_cols] = scaler.fit_transform(data_normalized[non_normalized_cols])
 
@@ -70,27 +106,22 @@ print("Normalization completed.")
 
 # Define the path to the folder where you want to save the normalized data
 folder_path = r'C:\Users\hp\OneDrive\Desktop\ARM SIR ML'
-# Define the full path for the CSV file
 file_path = os.path.join(folder_path, 'normalized_data.csv')
-
-# Save the normalized data to the specified path
 data_normalized.to_csv(file_path, index=False)
 print(f"Normalized data saved to '{file_path}'.")
 
-# Prepare data for PCA: Drop non-numeric columns
+# Prepare data for PCA: Drop non-numeric columns (like 'ID_REF')
 features = data_normalized.drop(columns=['ID_REF'])
-
-# Standardize features before applying PCA
 scaler = StandardScaler()
 features_scaled = scaler.fit_transform(features)
 
 # Perform PCA to reduce dimensionality for visualization
-pca = PCA(n_components=2)  # Reduce to 2 components for 2D visualization
+pca = PCA(n_components=2)
 features_pca = pca.fit_transform(features_scaled)
 
 # Determine the optimal number of clusters using the Elbow Method
-wcss = []  # Within-cluster sum of squares
-k_values = range(1, 11)  # Testing k from 1 to 10
+wcss = []
+k_values = range(1, 11)
 
 for k in k_values:
     kmeans = KMeans(n_clusters=k, random_state=0)
@@ -106,41 +137,40 @@ plt.grid(True)
 plt.show()
 
 # Apply K-Means clustering with different values of k
-cluster_results = {}
-
-plt.figure(figsize=(16, 12))
-
 for k in [2, 3, 4, 5]:
     kmeans = KMeans(n_clusters=k, random_state=0)
-    cluster_labels = kmeans.fit_predict(features_pca)
+    cluster_labels = kmeans.fit_predict(features_scaled)
     cluster_centers = kmeans.cluster_centers_
 
-    # Store results
-    cluster_results[k] = {
-        'labels': cluster_labels,
-        'centers': cluster_centers,
-        'silhouette_score': silhouette_score(features_pca, cluster_labels)
-    }
+    # Project cluster centers to PCA space for visualization
+    centers_pca = pca.transform(cluster_centers)
 
-    # Plotting
-    plt.subplot(2, 2, [2, 3, 4, 5].index(k) + 1)
-    scatter = plt.scatter(features_pca[:, 0], features_pca[:, 1], c=cluster_labels, cmap='viridis', marker='o',
-                          alpha=0.6)
-    plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], s=300, c='red', marker='X', label='Centroids')
-    plt.title(f'K-Means Clustering (k={k})\nSilhouette Score: {cluster_results[k]["silhouette_score"]:.2f}')
-    plt.xlabel('PCA Component 1')
-    plt.ylabel('PCA Component 2')
-    plt.legend()
-    plt.colorbar(scatter, label='Cluster Label')
+    # Find genes closest to cluster centers
+    center_genes = find_closest_genes_to_centers(cluster_centers, features_scaled, gene_names)
 
-# Display all plots
-plt.tight_layout()
-plt.show()
+    # Create DataFrame with only the center genes
+    result_df = pd.DataFrame({
+        'ID_REF': center_genes,
+        'Cluster': range(1, k+1)
+    })
 
-print("K-Means clustering visualizations completed.")
+    # Add original expression values for center genes
+    for i, gene_id in enumerate(center_genes):
+        original_values = original_data.loc[original_data['ID_REF'] == gene_id].iloc[:, 1:].values[0]
+        result_df.loc[i, original_data.columns[1:]] = original_values
 
-# Print cluster centers and silhouette scores for each k
-for k in [2, 3, 4, 5]:
-    print(f"\nCluster Centers for k={k}:")
-    print(cluster_results[k]['centers'])
-    print(f"Silhouette Score for k={k}: {cluster_results[k]['silhouette_score']:.2f}")
+    # Save the result to CSV
+    file_path = os.path.join(folder_path, f'cluster_centers_k{k}.csv')
+    result_df.to_csv(file_path, index=False)
+    print(f"Cluster centers for k={k} saved to '{file_path}'.")
+
+    # Optional: Display the results
+    print(f"\nCluster centers for k={k}:")
+    print(result_df.to_string(index=False))
+
+    # Plot the clusters
+    plot_clusters(features_pca, cluster_labels, centers_pca, k)
+
+    # Print silhouette scores for each k value
+    score = silhouette_score(features_scaled, cluster_labels)
+    print(f"Silhouette Score for k={k}: {score:.4f}")
