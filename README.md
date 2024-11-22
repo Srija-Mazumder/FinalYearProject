@@ -1,4 +1,5 @@
-Alzheimer's Disease Influencing Genes Identification using Machine Learning
+**Alzheimer's Disease Influencing Genes Identification using Machine Learning**
+
 Project Overview
 This project aims to identify influencing genes in Alzheimer's disease by leveraging unsupervised machine learning techniques. The analysis is performed on two gene expression datasets:
 
